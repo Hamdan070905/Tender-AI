@@ -1,0 +1,143 @@
+"""
+ADD these two endpoints to your existing tenders.py
+Place them BEFORE the last line (the competitor-insights endpoint or EOF)
+"""
+
+# ── PDF Export ─────────────────────────────────────────────────────
+@router.get("/{tender_id}/pdf")
+async def export_tender_pdf(
+    tender_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """Generate and return a PDF of the tender details."""
+    from fastapi.responses import StreamingResponse
+    import io, json as _json
+
+    tender = await db.get(Tender, tender_id)
+    if not tender:
+        raise HTTPException(status_code=404, detail="Tender not found")
+
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.colors import HexColor, white
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+        from reportlab.lib.units import cm
+
+        buf = io.BytesIO()
+        doc = SimpleDocTemplate(buf, pagesize=A4,
+                                leftMargin=2*cm, rightMargin=2*cm,
+                                topMargin=2*cm, bottomMargin=2*cm)
+
+        styles = getSampleStyleSheet()
+        TEAL = HexColor("#14b8a6")
+        GRAY = HexColor("#64748b")
+
+        t_style  = ParagraphStyle("t",  fontSize=15, textColor=TEAL, spaceAfter=4, fontName="Helvetica-Bold")
+        h2_style = ParagraphStyle("h2", fontSize=11, textColor=TEAL, spaceAfter=4, fontName="Helvetica-Bold")
+        b_style  = ParagraphStyle("b",  fontSize=9,  spaceAfter=4,  fontName="Helvetica", leading=13)
+        s_style  = ParagraphStyle("s",  fontSize=8,  textColor=GRAY, fontName="Helvetica")
+
+        def fmt(val, div=10_000_000, suffix="Cr"):
+            if not val: return "N/A"
+            v = val / div
+            return f"₹{v:.1f}{suffix}" if v >= 1 else f"₹{val/100000:.1f}L"
+
+        def parse_list(s):
+            if not s: return []
+            if isinstance(s, list): return s
+            try: return _json.loads(s)
+            except: return [s]
+
+        def fdate(d):
+            if not d: return "N/A"
+            return d.strftime("%d %b %Y") if hasattr(d, "strftime") else str(d)[:10]
+
+        story = []
+        story.append(Paragraph("TenderAI · Kelvin6K Tender Intelligence", s_style))
+        story.append(HRFlowable(width="100%", thickness=1, color=TEAL, spaceAfter=8))
+        story.append(Paragraph(tender.title or "Tender", t_style))
+        story.append(Paragraph(tender.organization or "", b_style))
+        story.append(Spacer(1, 8))
+
+        metrics = [
+            ["Budget", fmt(tender.budget_max), "Deadline", fdate(tender.deadline)],
+            ["Source", (tender.source or "").upper(), "Country", tender.country or "India"],
+        ]
+        tbl = Table(metrics, colWidths=[3*cm, 6*cm, 3*cm, 6*cm])
+        tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0,0),(0,-1), HexColor("#e2e8f0")),
+            ("BACKGROUND", (2,0),(2,-1), HexColor("#e2e8f0")),
+            ("FONTNAME",(0,0),(-1,-1),"Helvetica"),
+            ("FONTSIZE",(0,0),(-1,-1),9),
+            ("PADDING",(0,0),(-1,-1),6),
+            ("GRID",(0,0),(-1,-1),0.5,HexColor("#cbd5e1")),
+        ]))
+        story.append(tbl)
+        story.append(Spacer(1, 12))
+
+        overview_val = getattr(tender, "overview", None) or (tender.raw_source_payload and isinstance(tender.raw_source_payload, dict) and tender.raw_source_payload.get("overview"))
+        if overview_val:
+            story.append(Paragraph("Summary", h2_style))
+            story.append(Paragraph(overview_val, b_style))
+            story.append(Spacer(1, 8))
+
+        elig_val = getattr(tender, "eligibility", None) or (tender.raw_source_payload and isinstance(tender.raw_source_payload, dict) and tender.raw_source_payload.get("eligibility"))
+        elig = parse_list(elig_val)
+        if elig:
+            story.append(Paragraph("Eligibility", h2_style))
+            for item in elig:
+                story.append(Paragraph(f"• {item}", b_style))
+            story.append(Spacer(1, 8))
+
+        risk_val = getattr(tender, "risk_flags", None) or (tender.raw_source_payload and isinstance(tender.raw_source_payload, dict) and tender.raw_source_payload.get("risk_flags"))
+        risks = parse_list(risk_val)
+        if risks:
+            story.append(Paragraph("Risk Flags", h2_style))
+            for item in risks:
+                story.append(Paragraph(f"⚠ {item}", b_style))
+            story.append(Spacer(1, 8))
+
+        story.append(HRFlowable(width="100%", thickness=0.5, color=GRAY))
+        story.append(Spacer(1, 4))
+        if tender.source_url and tender.source_url != "uploaded_file":
+            story.append(Paragraph(
+                f'Source: <a href="{tender.source_url}" color="#14b8a6">{tender.source_url}</a>', s_style))
+        story.append(Paragraph(
+            "Generated by TenderAI · Kelvin6K Robotic & Sustainable Construction Technology", s_style))
+
+        doc.build(story)
+        buf.seek(0)
+        fname = f"tender_{tender_id[:8]}.pdf"
+        return StreamingResponse(buf, media_type="application/pdf",
+                                 headers={"Content-Disposition": f"attachment; filename={fname}"})
+    except ImportError:
+        raise HTTPException(500, "Run: pip install reportlab")
+
+
+# ── Source URL redirect fix ────────────────────────────────────────
+@router.get("/{tender_id}/source-redirect")
+async def source_redirect(
+    tender_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user)
+):
+    """Redirect to the EXACT tender source URL (not portal homepage)."""
+    from fastapi.responses import RedirectResponse
+    tender = await db.get(Tender, tender_id)
+    if not tender:
+        raise HTTPException(404, "Tender not found")
+    url = tender.source_url
+    if not url or url == "uploaded_file" or url in [
+        "https://eprocure.gov.in/cppp/latestactivetendersnew",
+        "https://bidplus.gem.gov.in/all-bids",
+    ]:
+        # Fallback to portal search page with tender title as query
+        title_q = (tender.title or "").replace(" ", "+")[:50]
+        source_map = {
+            "cppp": f"https://eprocure.gov.in/cppp/latestactivetendersnew",
+            "gem":  f"https://bidplus.gem.gov.in/all-bids",
+        }
+        url = source_map.get(tender.source or "", f"https://eprocure.gov.in/cppp/latestactivetendersnew")
+    return RedirectResponse(url=url, status_code=302)

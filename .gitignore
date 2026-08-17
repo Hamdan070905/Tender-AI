@@ -1,0 +1,104 @@
+# =========================
+# Environment / Secrets
+# =========================
+.env
+.env.*
+!.env.example
+
+# =========================
+# Python
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+.venv/
+venv/
+env/
+ENV/
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# =========================
+# Node / Frontend
+# =========================
+node_modules/
+dist/
+build/
+.vite/
+
+# =========================
+# Databases / Local Data
+# =========================
+*.db
+*.sqlite
+*.sqlite3
+
+# =========================
+# Logs
+# =========================
+*.log
+logs/
+
+# =========================
+# OS
+# =========================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# =========================
+# IDE
+# =========================
+.vscode/
+.idea/
+
+# =========================
+# Python tooling
+# =========================
+*.egg-info/
+.eggs/
+
+# =========================
+# Temporary files
+# =========================
+*.tmp
+*.temp
+*.bak
+*.swp
+
+# =========================
+# Uploaded/generated data
+# =========================
+uploads/
+output/
+outputs/
+tmp/
+temp/
+
+# =========================
+# AI / ML generated artifacts
+# =========================
+*.pt
+*.pth
+*.onnx
+*.bin
+
+# =========================
+# Qdrant / vector DB local data
+# =========================
+qdrant_storage/
+storage/
+
+# =========================
+# Backup / Restored / Cache Folders
+# =========================
+backend_restored/
+backup/
+backups/
+.npm-cache/
